@@ -92,7 +92,7 @@ void ZedCamera::getOdParams()
       << sl::toString(mObjFilterMode).c_str());
 
   // ----> Object Detection model
-  std::string model_str;
+  std::string model_str = "MULTI_CLASS_BOX_FAST";
   sl_tools::getParam(
     shared_from_this(), "object_detection.detection_model",
     model_str, model_str);
@@ -1011,7 +1011,9 @@ void ZedCamera::processDetectedObjects(rclcpp::Time t)
   size_t objdet_sub_count = 0;
 
   try {
-    objdet_sub_count = count_subscribers(mPubObjDet->get_topic_name());
+    if (mPubObjDet) {
+      objdet_sub_count = count_subscribers(mPubObjDet->get_topic_name());
+    }
   } catch (...) {
     rcutils_reset_error();
     DEBUG_STREAM_OD(
