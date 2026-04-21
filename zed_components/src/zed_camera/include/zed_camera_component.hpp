@@ -16,9 +16,12 @@
 #define ZED_CAMERA_COMPONENT_HPP_
 
 #include <atomic>
+#include <chrono>
 #include <sl/Camera.hpp>
 #include <sl/Fusion.hpp>
 #include <unordered_set>
+
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include "sl_version.hpp"
 #include "sl_tools.hpp"
@@ -235,6 +238,7 @@ protected:
     camInfoMsgPtr & camInfoMsg,
     const std::string & imgFrameId,
     const rclcpp::Time & t);
+
 #ifdef FOUND_ISAAC_ROS_NITROS
   void publishImageWithInfo(
     const sl::Mat & img,
@@ -249,10 +253,11 @@ protected:
     const camInfoPub & infoPub,
     camInfoMsgPtr & camInfoMsg, const rclcpp::Time & t);
 
-  void publishDepthMapWithInfo(sl::Mat & depth, rclcpp::Time t);
-  void publishDisparity(sl::Mat disparity, rclcpp::Time t);
+  void publishDepthMapWithInfo(const sl::Mat & depth, const rclcpp::Time & t);
+  void publishDisparity(const sl::Mat & disparity, const rclcpp::Time & t);
 
   void processVideoDepth();
+  bool updateVideoDepthSubscribers(bool force = false);
   bool areVideoDepthSubscribed();
   void retrieveVideoDepth(bool gpu);
   bool retrieveLeftImage(bool gpu);
@@ -316,6 +321,7 @@ protected:
 
   // ----> Utility functions
   bool isDepthRequired();
+  bool updatePosTrackingSubscribers(bool force = false);
   bool isPosTrackingRequired();
 
   void applyVideoSettings();
@@ -432,6 +438,7 @@ private:
   // ----> Parameter variables
   // Debug
   bool _debugCommon = false;
+  bool _debugDynParams = false;
   bool _debugGrab = false;
   bool _debugSim = false;
   bool _debugVideoDepth = false;
@@ -501,9 +508,13 @@ private:
   unsigned int mSensFwVersion;                 // Sensors FW version
   std::string mCameraName = "zed";             // Default camera name
   int mCamGrabFrameRate = 15;
+  double mGrabComputeCappingFps = 0.0;
   bool mAsyncImageRetrieval = false;
   int mImageValidityCheck = 1;
   std::string mSvoFilepath = "";
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+  std::string mSvoDecryptionKey = "";
+#endif
   bool mSvoLoop = false;
   bool mSvoRealtime = false;
   int mSvoFrameStart = 0;
@@ -526,6 +537,7 @@ private:
   double mCamMinDepth = 0.01;
   double mCamMaxDepth = 15.0;
   sl::DEPTH_MODE mDepthMode = sl::DEPTH_MODE::NEURAL;
+  std::string mDepthModelOverride;  // Optional model file override for depth mode
   PcRes mPcResolution = PcRes::COMPACT;
   std::atomic<bool> mDepthDisabled = false;  // Indicates if depth calculation is not required (DEPTH_MODE::NONE)
   int mDepthStabilization = 0;
@@ -555,7 +567,7 @@ private:
   std::string mAreaMemoryFilePath = "";
   bool mLocalizationOnly = false;
   sl::POSITIONAL_TRACKING_MODE mPosTrkMode =
-    sl::POSITIONAL_TRACKING_MODE::GEN_3;
+    sl::POSITIONAL_TRACKING_MODE::GEN_1;
   bool mSaveAreaMemoryOnClosing = true;
   bool mImuFusion = true;
   bool mFloorAlignment = false;
@@ -612,6 +624,7 @@ private:
   double mObjDetFruitsConf = 50.0;
   bool mObjDetSportEnable = true;
   double mObjDetSportConf = 50.0;
+  bool mObjDetRtParamsDirty = true;  // Force initial setRuntimeParameters call
   sl::OBJECT_DETECTION_MODEL mObjDetModel =
     sl::OBJECT_DETECTION_MODEL::MULTI_CLASS_BOX_FAST;
   sl::OBJECT_FILTERING_MODE mObjFilterMode = sl::OBJECT_FILTERING_MODE::NMS3D;
@@ -635,6 +648,7 @@ private:
   double mBodyTrkPredTimeout = 0.5;
   double mBodyTrkConfThresh = 50.0;
   int mBodyTrkMinKp = 10;
+  bool mBodyTrkRtParamsDirty = true;  // Force initial setRuntimeParameters call
 
   double mPdMaxDistanceThreshold = 0.15;
   double mPdNormalSimilarityThreshold = 15.0;
@@ -772,9 +786,7 @@ private:
   bool mGnss2BaseTransfFirstErr = true;
   bool mMap2UtmTransfValid = false;
 
-  std::atomic_uint16_t mAiInstanceID;
-  uint16_t mObjDetInstID;
-  uint16_t mBodyTrkInstID;
+
   // <---- TF Transforms Flags
 
   // ----> Messages (ONLY THOSE NOT CHANGING WHILE NODE RUNS)
@@ -922,6 +934,12 @@ private:
   size_t mConfMapSubCount = 0;
   size_t mDisparitySubCount = 0;
   size_t mDepthInfoSubCount = 0;
+  size_t mPcSubCount = 0;
+  std::chrono::steady_clock::time_point mLastVideoDepthSubCountQuery;
+  bool mVideoDepthSubCountInit = false;
+  size_t mPosTrackingSubCount = 0;
+  std::chrono::steady_clock::time_point mLastPosTrackingSubCountQuery;
+  bool mPosTrackingSubCountInit = false;
 
   sl::Mat mMatLeft, mMatLeftRaw;
   sl::Mat mMatRight, mMatRightRaw;
@@ -936,6 +954,7 @@ private:
   // ----> Point cloud variables
   sl::Mat mMatCloud;
   sl::FusedPointCloud mFusedPC;
+  sensor_msgs::msg::PointCloud2 mPcMsg;  // Reused across frames to avoid per-frame allocation
   // <---- Point cloud variables
 
   // ----> Subscribers
@@ -983,7 +1002,7 @@ private:
   // ----> Status Flags
   bool mDebugMode = false;  // Debug mode active?
   bool mSvoMode = false;
-  bool mSvoPause = false;
+  std::atomic<bool> mSvoPause{false};
   int mSvoFrameId = 0;
   int mSvoFrameCount = 0;
   bool mPosTrackingStarted = false;
@@ -995,6 +1014,7 @@ private:
     false;    // Indicates if point cloud data are subscribed and then published
   bool mTriggerAutoExpGain = true;  // Triggered on start
   bool mTriggerAutoWB = true;       // Triggered on start
+  bool mCamSettingsDirty = true;    // Force initial apply on start
   bool mRecording = false;
   sl::RecordingStatus mRecStatus = sl::RecordingStatus();
   bool mPosTrackingReady = false;
