@@ -21,9 +21,12 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/clock.hpp>
+#include <sensor_msgs/distortion_models.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sl/Camera.hpp>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <sstream>
 
@@ -94,11 +97,47 @@ std::string getFullFilePath(const std::string & file_name);
  */
 std::string getSDKVersion(int & major, int & minor, int & sub_minor);
 
-/*! \brief Convert StereoLabs timestamp to ROS timestamp
+/*! \brief Convert a Stereolabs timestamp to ROS timestamp.
+ *
+ *  Single conversion entry point: works for any source (live grab, SVO
+ *  replay, sim-injected, /clock topic, etc.). The live-time offset configured
+ *  via \ref setSdkLiveTimeOffsetNs is applied automatically, except when
+ *  replay mode is active (set via \ref setSdkReplayMode), in which case the
+ *  timestamp passes through unchanged so file-recorded / sim-injected stamps
+ *  retain their original ROS-epoch value.
+ *
  *  \param t : Stereolabs timestamp to be converted
- *  \param t : ROS 2 clock type
+ *  \param clock_type : ROS 2 clock type
  */
 rclcpp::Time slTime2Ros(sl::Timestamp t, rcl_clock_type_t clock_type = RCL_ROS_TIME);
+
+/*! \brief Set the offset (nanoseconds) added to live SDK timestamps in
+ *         \ref slTime2Ros.
+ *
+ *  Process-wide. Set once after a successful \p Camera::open() when the SDK is
+ *  configured with a monotonic \p TIMESTAMP_CLOCK (SDK >= 5.3): pass
+ *  \p ros_now_ns - sl::getCurrentTimeStamp_ns so live monotonic stamps land
+ *  in the ROS epoch. Pass 0 to disable the shim. Default: 0.
+ *  Has no effect when replay mode is active (see \ref setSdkReplayMode).
+ */
+void setSdkLiveTimeOffsetNs(int64_t offset_ns);
+
+/*! \brief Get the current live-time offset (nanoseconds). */
+int64_t getSdkLiveTimeOffsetNs();
+
+/*! \brief Mark the process as running in a replay/sim input mode.
+ *
+ *  Process-wide. Set once at component startup based on the camera input
+ *  mode: \p true for SVO playback or simulation, \p false for a live camera.
+ *  When \p true, \ref slTime2Ros bypasses the live-time offset so file-
+ *  recorded / sim-injected timestamps pass through unchanged. Default: false.
+ *  Multi-camera compositions with conflicting modes are not supported (the
+ *  underlying \p sl::Camera::setTimestampClock is also process-wide).
+ */
+void setSdkReplayMode(bool isReplay);
+
+/*! \brief Get the current replay-mode flag. */
+bool getSdkReplayMode();
 
 /*! \brief check if ZED
  * \param camModel the model to check
@@ -399,6 +438,21 @@ bool checkParamRange(
   return true;
 }
 // <---- Template functions definitions
+
+/*! \brief Fill the distortion model and the distortion coefficients of a
+ *  `CameraInfo` message from the calibration parameters reported by the ZED SDK.
+ *
+ *  The model is taken from `sl::CameraParameters::lens_distortion_model` when the
+ *  ZED SDK provides it (>= 5.4), instead of being guessed from the camera model:
+ *  the lens, not the camera, decides it, and a fisheye ZED X One or ZED Mini is
+ *  not distinguishable from its siblings by model alone.
+ *
+ *  \param zed_params : the raw or rectified calibration parameters of one camera
+ *  \param cam_info : the message to fill
+ */
+void fillCamInfoDistortion(
+  const sl::CameraParameters & zed_params,
+  sensor_msgs::msg::CameraInfo & cam_info);
 
 }  // namespace sl_tools
 

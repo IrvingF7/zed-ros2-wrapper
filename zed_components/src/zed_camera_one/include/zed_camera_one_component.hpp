@@ -28,6 +28,14 @@
 namespace stereolabs
 {
 
+// Categorizes image topics for transport plugin filtering.
+// IMAGE: visual data from sl::VIEW (8-bit: BGRA8, BGR8, MONO8)
+// MEASURE: metric data from sl::MEASURE (float: 32FC1, or 16UC1 in OpenNI mode)
+#ifndef STEREOLABS_IMAGE_TOPIC_TYPE_DEFINED
+#define STEREOLABS_IMAGE_TOPIC_TYPE_DEFINED
+enum class ImageTopicType { IMAGE, MEASURE };
+#endif
+
 class ZedCameraOne : public rclcpp::Node
 {
 public:
@@ -45,6 +53,7 @@ protected:
   void initServices();
   void initTFCoordFrameNames();
   void initPublishers();
+  void initSubscribers();
   void initVideoPublishers();
   void initSensorPublishers();
   void initializeTimestamp();
@@ -57,6 +66,7 @@ protected:
   void getGeneralParams();
   void getTopicEnableParams();
   void getSvoParams();
+  void getSimParams();
   void getStreamParams();
   void getCameraModelParams();
   void getCameraInfoParams();
@@ -116,6 +126,19 @@ protected:
     camInfoMsgPtr & camInfoMsg,
     const std::string & imgFrameId,
     const rclcpp::Time & t);
+
+  // IPC-aware overload: publishes zero-copy via rclcpp::Publisher and
+  // compressed via image_transport when subscribers exist
+  void publishImageWithInfo(
+    const sl::Mat & img,
+    const adaptedImagePub & ipcPubImg,
+    const image_transport::Publisher & itPubImg,
+    const camInfoPub & infoPub,
+    const camInfoPub & infoPubTrans,
+    camInfoMsgPtr & camInfoMsg,
+    const std::string & imgFrameId,
+    const rclcpp::Time & t);
+
 #ifdef FOUND_ISAAC_ROS_NITROS
   void publishImageWithInfo(
     const sl::Mat & img,
@@ -138,6 +161,12 @@ protected:
   void publishImuRawMsg(const rclcpp::Time & ts_imu, const sl::SensorsData & sens_data);
 
   void publishClock(const sl::Timestamp & ts);
+  /*! \brief Get the SDK timestamp of the last grabbed frame, using the
+   * reference selected by the `general.timestamp_reference` parameter.
+   * Falls back to `TIME_REFERENCE::IMAGE` for the rest of the session if the
+   * input does not provide a per-frame exposure (the SDK then returns 0).
+   */
+  sl::Timestamp getFrameSdkTimestamp();
 
   void updateCaptureDiagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
   void updateInputModeDiagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
@@ -166,7 +195,6 @@ protected:
   bool waitForCameraOpen();
   bool waitForSensorSubscribers();
   bool handleSensorPublishing();
-  void adjustSensorPublishingFrequency();
 
   bool handleDynamicVideoParam(
     const rclcpp::Parameter & param, const std::string & param_name,
@@ -195,6 +223,7 @@ protected:
     diagnostic_updater::DiagnosticStatusWrapper & stat);
   void callback_pubTemp();
   void callback_pubHeartbeat();
+  void callback_clock(const rosgraph_msgs::msg::Clock::SharedPtr msg);
 
   void callback_enableStreaming(
     const std::shared_ptr<rmw_request_id_t> request_header,
@@ -208,6 +237,10 @@ protected:
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<std_srvs::srv::Trigger_Request> req,
     std::shared_ptr<std_srvs::srv::Trigger_Response> res);
+  void callback_pauseSvoRec(
+    const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<std_srvs::srv::SetBool_Request> req,
+    std::shared_ptr<std_srvs::srv::SetBool_Response> res);
   void callback_pauseSvoInput(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<std_srvs::srv::Trigger_Request> req,
@@ -252,6 +285,7 @@ private:
   bool _debugCamCtrl = false;
   bool _debugStreaming = false;
   bool _debugAdvanced = false;
+  bool _debugSim = false;
   bool _debugNitros = false;
   bool _debugTf = false;
   // If available, force disable NITROS usage for debugging and testing
@@ -284,6 +318,14 @@ private:
   image_transport::Publisher _pubColorRawImg;
   image_transport::Publisher _pubGrayImg;
   image_transport::Publisher _pubGrayRawImg;
+
+  // IPC-aware raw image publishers (zero-copy capable)
+  // Type-adapted publishers: intra-process subscribers receive StampedSlMat
+  // directly (no serialization), inter-process subscribers get auto-converted Image
+  adaptedImagePub _pubIpcColorImg;
+  adaptedImagePub _pubIpcColorRawImg;
+  adaptedImagePub _pubIpcGrayImg;
+  adaptedImagePub _pubIpcGrayRawImg;
 
 #ifdef FOUND_ISAAC_ROS_NITROS
   // Nitros image publishers with camera info
@@ -321,6 +363,11 @@ private:
   heartbeatStatusPub _pubHeartbeatStatus;
   // <---- Publishers
 
+  // ----> Subscribers
+  // Simulation clock subscriber, used when `use_sim_time` is true
+  clockSub _clockSub;
+  // <---- Subscribers
+
   // ----> Publisher variables
   bool _usingIPC = false;
   sl::Timestamp _lastTs_grab = 0;  // Used to calculate stable publish frequency
@@ -332,7 +379,6 @@ private:
 
   std::atomic<size_t> _imuSubCount;
   std::atomic<size_t> _imuRawSubCount;
-  double _sensRateComp = 1.0;
 
   sl::Mat _matColor, _matColorRaw;
   sl::Mat _matGray, _matGrayRaw;
@@ -351,11 +397,24 @@ private:
   std::string _sdkVerboseLogFile = ""; // SDK Verbose Log file
   int _gpuId = -1; // GPU ID
   bool _usePubTimestamps = false; // Use publishing timestamp instead of grab timestamp
+  bool _useSdkMonotonicClock = false;  // true when a monotonic clock is selected
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+  // Clock source used for every SDK timestamp. Process-wide setting.
+  sl::TIMESTAMP_CLOCK _sdkTimestampClock = sl::TIMESTAMP_CLOCK::SYSTEM_CLOCK;
+  // Maximum backward host-clock step followed per sample, in ms, in
+  // SYSTEM_CLOCK mode. 4.0 is the ZED SDK default; negative disables clamping.
+  double _maxSysClockStepMs = 4.0;
+#endif
+  // Time reference used for the frame timestamps of the published data
+  sl::TIME_REFERENCE _tsReference = sl::TIME_REFERENCE::IMAGE;
   bool _grabOnce = false;
   bool _grabImuOnce = false;
 
   int _camSerialNumber = 0; // Camera serial number
   int _camId = -1; // Camera ID
+  // Bus the camera is opened from when selecting it by ID. AUTO lets the ZED
+  // SDK look on every bus, which is what the serial number path already does.
+  sl::BUS_TYPE _camBusType = sl::BUS_TYPE::AUTO;
 
   sl::MODEL _camUserModel = sl::MODEL::ZED_XONE_GS;  // Default camera model
 
@@ -375,6 +434,7 @@ private:
   std::string _svoFilepath = "";
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
   std::string _svoDecryptionKey = "";
+  std::string _svoRecEncryptionKey = "";
 #endif
   bool _svoLoop = false;
   bool _svoRealtime = false;
@@ -382,6 +442,12 @@ private:
   bool _useSvoTimestamp = false;
   bool _publishSvoClock = false;
   bool _publishStatus = true;
+
+  bool _simMode = false;     // Expecting simulation data?
+  bool _useSimTime = false;  // Use sim time?
+  std::string _simAddr =
+    "127.0.0.1";           // The local address of the machine running the simulator
+  int _simPort = 30000;    // The port to be used to connect to the simulator
 
   std::string _streamAddr = "";      // Address for local streaming input
   int _streamPort = 10000;
@@ -401,6 +467,8 @@ private:
   int _streamingServerTargetFramerate = 0;
 
   double _sensPubRate = 200.;
+  double _imuOdr = 0.0;          // Hardware IMU output data rate [Hz] (0 = unknown)
+  double _imuDecimAccum = 0.0;   // Fractional accumulator for IMU rate decimation
   // <---- Parameters
 
   // ----> Dynamic params
@@ -426,6 +494,8 @@ private:
   int _camAutoDigitalGainRangeMin = 1;
   int _camAutoDigitalGainRangeMax = 256;
   int _camDenoising = 50;
+  int _camAEAntibanding = 1;  // 0=OFF, 1=AUTO, 2=50Hz, 3=60Hz
+  int _sceneIlluminance = -1;  // Read-only, populated from SDK getCameraSettings
   std::unordered_map<std::string, bool> _camDynParMapChanged;
   // <---- Dynamic params
 
@@ -447,7 +517,12 @@ private:
 
   // ----> Timestamps
   rclcpp::Time _frameTimestamp;
-  rclcpp::Time _lastTs_imu;
+  rclcpp::Time _lastTs_imu;      // Timestamp of the last PUBLISHED IMU sample
+  rclcpp::Time _lastSeenTs_imu;  // Timestamp of the last IMU sample READ from the SDK
+  double _imuSamplePeriod = 0.0;  // Measured interval between IMU samples [sec] (0 = not yet known)
+  rclcpp::Time _lastClock;  // Last received simulation clock value
+  // Indicates if the "/clock" topic is publishing a valid simulation time
+  std::atomic<bool> _clockAvailable;
   // <---- Timestamps
 
   // ----> TF handling
@@ -505,6 +580,10 @@ private:
   std::unique_ptr<sl_tools::WinAvg> _pubImuTF_sec;
   std::unique_ptr<sl_tools::WinAvg> _pubImu_sec;
   bool _imuPublishing = false;
+  // Refreshed every SENS_SUB_COUNT_REFRESH_SEC instead of on every poll of the
+  // (multi-kHz) sensors thread
+  std::chrono::steady_clock::time_point _sensSubCountLastCheck;
+  bool _sensSubCountInit = false;
   bool _videoPublishing = false;
   bool _imageSubscribed = false;
 
@@ -523,12 +602,16 @@ private:
   unsigned int _svoRecFramerate = 0;
   bool _svoRecTranscode = false;
   std::string _svoRecFilename;
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+  sl::SVO_ENCODING_PRESET _svoRecEncodingPreset = sl::SVO_ENCODING_PRESET::DEFAULT;
+#endif
   // <---- SVO Recording parameters
 
   // ----> Services
   enableStreamingPtr _srvEnableStreaming;
   startSvoRecSrvPtr _srvStartSvoRec;
   stopSvoRecSrvPtr _srvStopSvoRec;
+  pauseSvoRecSrvPtr _srvPauseSvoRec;
   pauseSvoSrvPtr _srvPauseSvo;
   setSvoFramePtr _srvSetSvoFrame;
 
@@ -539,6 +622,7 @@ private:
   const std::string _srvEnableStreamingName = "enable_streaming";
   const std::string _srvStartSvoRecName = "start_svo_rec";
   const std::string _srvStopSvoRecName = "stop_svo_rec";
+  const std::string _srvPauseSvoRecName = "pause_svo_rec";
   const std::string _srvToggleSvoPauseName = "toggle_svo_pause";
   const std::string _srvSetSvoFrameName = "set_svo_frame";
   // <---- Services names
