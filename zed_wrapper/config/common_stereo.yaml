@@ -28,15 +28,15 @@
             camera_flip: false
             self_calib: true # Enable the self-calibration process at camera opening. See https://www.stereolabs.com/docs/api/structsl_1_1InitParameters.html#affeaa06cfc1d849e311e484ceb8edcc5
             serial_number: 0 # overwritten by launch file
-            pub_resolution: 'NATIVE' # The resolution used for image and depth map publishing. 'NATIVE' to use the same `general.grab_resolution` - `CUSTOM` to apply the `general.pub_downscale_factor` downscale factory to reduce bandwidth in transmission
-            pub_downscale_factor: 2.0 # rescale factor used to rescale image before publishing when 'pub_resolution' is 'CUSTOM'
+            pub_resolution: 'CUSTOM' # The resolution used for image and depth map publishing. 'NATIVE' to use the same `general.grab_resolution` - `CUSTOM` to apply the `general.pub_downscale_factor` downscale factory to reduce bandwidth in transmission
+            pub_downscale_factor: 2.5 # rescale factor used to rescale image before publishing when 'pub_resolution' is 'CUSTOM'
             grab_compute_capping_fps: 0.0 # Define a computation upper limit to the grab frequency. This can be useful to get a known constant fixed rate or limit the computation load while keeping a short exposure time by setting a high camera capture framerate. If set to 0, the grab compute capping will be disabled and the ZED SDK will process data at the grab rate.
-            pub_frame_rate: 0.0 # [DYNAMIC] Frequency of publishing of visual images and depth data (not the Point Cloud, see 'depth.point_cloud_freq'). This value must be <= the camera framerate. Set to 0 for no limit (= grab_frame_rate).
+            pub_frame_rate: 15 # [DYNAMIC] Frequency of publishing of visual images and depth data (not the Point Cloud, see 'depth.point_cloud_freq'). This value must be <= the camera framerate. Set to 0 for no limit (= grab_frame_rate).
             enable_image_validity_check: 1 # [SDK5 required] Sets the image validity check. If set to 1, the SDK will check if the frames are valid before processing.
             gpu_id: -1
             optional_opencv_calibration_file: '' # Optional path where the ZED SDK can find a file containing the calibration information of the camera computed by OpenCV. Read the ZED SDK documentation for more information: https://www.stereolabs.com/docs/api/structsl_1_1InitParameters.html#a9eab2753374ef3baec1d31960859ba19
             async_image_retrieval: false # If set to true will camera image retrieve at a framerate different from \ref grab() application framerate. This is useful for recording SVO or sending camera stream at different rate than application.
-            publish_status: true # Advertise the status topics that are published only if a node subscribes to them
+            publish_status: false # Disable status topics to reduce overhead
             sdk_timestamp_clock: 'SYSTEM_CLOCK' # Clock source used for every SDK timestamp (images and sensors): 'SYSTEM_CLOCK' (default, wall clock, affected by NTP/PTP), 'MONOTONIC_CLOCK' (immune to clock steps, but still frequency-slewed by NTP/PTP) or 'MONOTONIC_RAW_CLOCK' (immune to steps and slewing, drifts against wall clock) [ZED SDK >= 5.3, 'MONOTONIC_RAW_CLOCK' >= 5.4]. Process-wide; the first node in a composition wins. When not 'SYSTEM_CLOCK' and 'use_pub_timestamps' is false, an offset captured at camera open keeps Header.stamp ROS-epoch-shaped while inter-frame deltas stay monotonic
             max_system_clock_step_ms: 4.0 # Maximum backward host-clock adjustment (NTP/PTP step, manual date change) the SDK follows per sample, in milliseconds, when 'sdk_timestamp_clock' is 'SYSTEM_CLOCK'. 4.0 is the ZED SDK default and suits slew-only NTP/PTP; use a negative value for PTP setups where step corrections must land instantly, 0.0 to freeze the offset captured on first use. Ignored with a monotonic clock, and always overridden by the 'ZED_SDK_MAX_SYSTEM_CLOCK_STEP_MS' environment variable [ZED SDK >= 5.3]
             sdk_use_monotonic_clock: false # [DEPRECATED - use 'sdk_timestamp_clock'] Kept for backward compatibility: when true and 'sdk_timestamp_clock' is left at 'SYSTEM_CLOCK', the SDK clock is set to 'MONOTONIC_CLOCK'
@@ -53,12 +53,12 @@
             gain: 80 # [DYNAMIC]
             auto_whitebalance: true # [DYNAMIC]
             whitebalance_temperature: 42 # [DYNAMIC] - [28,65] x100 - works only if `auto_whitebalance` is false
-            enable_24bit_output: false # [SDK >= 5.1] Enable BGR 24-bit output for lower bandwidth usage. If false, BGRA 32-bit output is used (old way before SDK v5.1)
-            publish_rgb: true # Advertise the RGB image topics that are published only if a node subscribes to them
-            publish_left_right: false # Advertise the left and right image topics that are published only if a node subscribes to them
-            publish_raw: false # Advertise the raw image topics that are published only if a node subscribes to them
-            publish_gray: false # Advertise the gray image topics that are published only if a node subscribes to them
-            publish_stereo: false # Advertise the stereo image topic that is published only if a node subscribes to it
+            enable_24bit_output: true # [SDK >= 5.1] Enable BGR 24-bit output for lower bandwidth usage. BGR8 instead of BGRA8.
+            publish_rgb: true # Publish RGB image topics (needed for our pipeline)
+            publish_left_right: false # Not needed - disable to save bandwidth
+            publish_raw: false # Not needed - disable to save bandwidth
+            publish_gray: false # Not needed - disable to save bandwidth
+            publish_stereo: false # Not needed - disable to save bandwidth
             # Other parameters are defined, according to the camera model, in the 'zed.yaml', 'zedm.yaml', 'zed2.yaml', 'zed2i.yaml'
             # 'zedx.yaml', 'zedxmini.yaml', 'virtual.yaml' files
 
@@ -66,12 +66,12 @@
             publish_imu_tf: true # [overwritten by launch file options] enable/disable the IMU TF broadcasting
             sensors_image_sync: false # Synchronize Sensors messages with latest published video/depth message
             sensors_pub_rate: 100. # frequency of publishing of sensors data. MAX: 400. - MIN: grab rate
-            publish_imu: true # Advertise the IMU topic that is published only if a node subscribes to it
-            publish_imu_raw: false # Advertise the raw IMU topic that is published only if a node subscribes to it
-            publish_cam_imu_transf: false # Advertise the CAMERA-IMU transformation topic that is published only if a node subscribes to it
-            publish_mag: false # Advertise the magnetometer topic that is published only if a node subscribes to it
-            publish_baro: false # Advertise the barometer topic that is published only if a node subscribes to it
-            publish_temp: false # Advertise the temperature topics that are published only if a node subscribes to them
+            publish_imu: false # Disable IMU to reduce overhead
+            publish_imu_raw: false # Disable raw IMU
+            publish_cam_imu_transf: false # Disable camera-IMU transform
+            publish_mag: false # Disable magnetometer
+            publish_baro: false # Disable barometer
+            publish_temp: false # Disable temperature
 
         region_of_interest:
             automatic_roi: false # Enable the automatic ROI generation to automatically detect part of the robot in the FoV and remove them from the processing. Note: if enabled the value of `manual_polygon` is ignored
@@ -89,35 +89,35 @@
             publish_roi_mask: false # Advertise the ROI mask image topic that is published only if a node subscribes to it
 
         depth:
-            depth_mode: 'NEURAL_LIGHT' # Matches the ZED SDK setting: 'NONE', 'NEURAL_LIGHT', 'NEURAL', 'NEURAL_PLUS' - Note: if 'NONE' all the modules that requires depth extraction are disabled by default (Pos. Tracking, Obj. Detection, Mapping, ...)
+            depth_mode: 'NONE' # Matches the ZED SDK setting: 'NONE' - depth disabled entirely for maximum RGB performance
             depth_precision: 'FP16' # Precision of the neural depth inference: 'FP16' (default), 'INT8' - 'INT8' is faster and uses less memory, for a small accuracy cost, and is only available with 'NEURAL'. Always safe to set: the ZED SDK falls back to 'FP16' when the depth mode or the GPU does not support 'INT8' [ZED SDK >= 5.5]
             allow_depth_cuda_graph: false # Allow the ZED SDK to record the depth computation once and replay it at each grab, lowering its CPU launch cost (most useful on Jetson). Depth output is unchanged. Best-effort: it only applies to the 'NEURAL' depth mode family, and the SDK reverts to the regular computation if the recording fails [ZED SDK >= 5.5]
-            depth_stabilization: -1 # Negative value takes SDK default, 0 is disabled - Range: [0,100]
+            depth_stabilization: 0 # Forces positional tracking to start if major than 0 - Range: [0,100]
             openni_depth_mode: false # 'false': 32bit float [meters], 'true': 16bit unsigned int [millimeters]
-            point_cloud_freq: 10.0 # [DYNAMIC] Frequency of the pointcloud publishing. This value must be <= the camera framerate. Set to 0 for no limit (= grab_frame_rate).
-            point_cloud_res: 'COMPACT' # The resolution used for point cloud publishing - 'COMPACT'-Standard resolution. Optimizes processing and bandwidth, 'REDUCED'-Half resolution. Low processing and bandwidth requirements
+            point_cloud_freq: 10.0 # [DYNAMIC] Irrelevant when depth_mode is NONE
+            point_cloud_res: 'COMPACT' # Irrelevant when depth_mode is NONE
             depth_confidence: 95 # [DYNAMIC]
             depth_texture_conf: 100 # [DYNAMIC]
             remove_saturated_areas: true # [DYNAMIC]
-            publish_depth_map: true # Advertise the depth map topics that are published only if a node subscribes to them
-            publish_depth_info: false # Advertise the depth info topic that is published only if a node subscribes to it
-            publish_point_cloud: true # Advertise the point cloud topic that is published only if a node subscribes to it
+            publish_depth_map: false # Disabled - not needed
+            publish_depth_info: false # Disabled - not needed
+            publish_point_cloud: false # Disabled - not needed
             voxel_point_cloud: false # [DYNAMIC] When true, publish voxel-decimated point cloud instead of full resolution [ZED SDK >= 5.3]
             voxel_size_mm: -1.0 # [DYNAMIC] Voxel grid cell size in millimeters. -1 = 100mm default. Clamped to [5, max_depth_range] [ZED SDK >= 5.3]
             voxel_resolution_mode: 'STEREO_UNCERTAINTY' # [DYNAMIC] Voxelization mode: 'FIXED', 'STEREO_UNCERTAINTY', 'LINEAR' [ZED SDK >= 5.3]
             voxel_resolution_scale: 0.2 # [DYNAMIC] Scale factor for depth-adaptive voxel growth [0.01, 3.0] [ZED SDK >= 5.3]
-            publish_depth_confidence: false # Advertise the depth confidence topic that is published only if a node subscribes to it
-            publish_disparity: false # Advertise the disparity topic that is published only if a node subscribes to it
+            publish_depth_confidence: false # Disabled - not needed
+            publish_disparity: false # Disabled - not needed
             # Other parameters are defined, according to the camera model, in the 'zed.yaml', 'zedm.yaml', 'zed2.yaml', 'zed2i.yaml'
             # 'zedx.yaml', 'zedxmini.yaml', 'virtual.yaml' files
 
         pos_tracking:
-            pos_tracking_enabled: true # True to enable positional tracking from start
-            pos_tracking_mode: 'AUTO' # 'AUTO' uses the SDK default; also supports 'GEN_1', 'GEN_3'
+            pos_tracking_enabled: false # Disabled - not needed for RGB-only
+            pos_tracking_mode: 'GEN_2' # SDK 5.1 default changed to GEN_2 for stability
             compute_preference: 'AUTO' # How much GPU the positional tracking may use: 'AUTO' (SDK default), 'PREFER_CPU' (leave the GPU free for your own workloads), 'PREFER_GPU' (faster tracking and lower 'grab()' time, at the cost of using the GPU). 'GEN_3' runs on the CPU by default; 'GEN_1' computes depth and so uses the GPU whatever the setting [ZED SDK >= 5.5]
-            imu_fusion: true # enable/disable IMU fusion. When set to false, only the optical odometry will be used.
-            publish_tf: true # [overwritten by launch file options] publish `odom -> camera_link` TF
-            publish_map_tf: true # [overwritten by launch file options] publish `map -> odom` TF
+            imu_fusion: false # enable/disable IMU fusion. When set to false, only the optical odometry will be used.
+            publish_tf: false # [overwritten by launch file options] publish `odom -> camera_link` TF
+            publish_map_tf: false # [overwritten by launch file options] publish `map -> odom` TF
             map_frame: 'map'
             odometry_frame: 'odom'
             area_memory: true # Enable to detect loop closure
